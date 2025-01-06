@@ -7,7 +7,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-    
+
 jobs:
   run-tests:
     name: Run Tests
@@ -16,9 +16,9 @@ jobs:
       - name: Test
         run:
           echo "Hello World!"
-          
-  all-checks-passed: 
-    name: All Checks Passed 
+
+  all-checks-passed:
+    name: All Checks Passed
     if: always()
     needs: run-tests
     runs-on: ubuntu-latest
@@ -30,21 +30,37 @@ jobs:
 
   auto-merge:
     name: Auto-Merge Admin PR After All Checks Passed
-    if: success() && ${{ contains(fromJson('["bebo1010"]'), github.actor) }}
+    if: success()
     needs: all-checks-passed
     runs-on: ubuntu-latest
     steps:
+      - name: Check permissions
+        id: check-permissions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          response=$(gh api repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission)
+          role=$(echo "$response" | jq -r '.role_name')
+          if [[ "$role" == "admin" ]]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create github app token
-        uses: actions/create-github-app-token@v1
         id: app-token
+        if: steps.check-permissions.outputs.authorized == 'true'
+        uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.AUTO_MERGE_BOT_APP_ID }}
           private-key: ${{ secrets.AUTO_MERGE_BOT_PRIVATE_KEY }}
 
       - name: Approve and squash the pull request
-        env: 
+        if: steps.check-permissions.outputs.authorized == 'true'
+        env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_URL: ${{github.event.pull_request.html_url}}
         run: |
           gh pr review --approve "$PR_URL"
+          gh pr comment "$PR_URL" -b "Well done 👍"
           gh pr merge --admin -s "$PR_URL"
